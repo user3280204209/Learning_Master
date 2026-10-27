@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.vscode/
+*.db
+backend/uploads/
+backend/.env
+.env
+frontend/node_modules/
+frontend/.vite/
+logs/*.log
+logs/*.png
