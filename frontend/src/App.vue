@@ -7,6 +7,7 @@ import ResourceStudio from './components/ResourceStudio.vue'
 import LearningPath from './components/LearningPath.vue'
 import TutorPanel from './components/TutorPanel.vue'
 import AssessmentPanel from './components/AssessmentPanel.vue'
+import UploadLab from './components/UploadLab.vue'
 import CreateStudentModal from './components/CreateStudentModal.vue'
 
 const tabs = [
@@ -16,6 +17,7 @@ const tabs = [
   { key: 'path', index: '04', label: '学习路径', title: '个性化学习路径', sub: '把资源组织成可执行、可检查的步骤' },
   { key: 'tutor', index: '05', label: '智能辅导', title: '智能辅导', sub: '结合画像与资源上下文即时答疑' },
   { key: 'assessment', index: '06', label: '学习评估', title: '学习效果评估', sub: '行为数据 → 评估 → 回写画像的闭环' },
+  { key: 'upload', index: '07', label: '上传实验', title: '文件传输实验台', sub: '分片上传 · 断点续传 · 上传/下载进度条 · Range 下载' },
 ]
 
 const activeTab = ref('dashboard')
@@ -263,7 +265,7 @@ onBeforeUnmount(() => {
           <h1>{{ currentTab.title }}</h1>
           <p>{{ currentTab.sub }}</p>
         </div>
-        <div class="topbar-actions">
+        <div v-if="activeTab !== 'upload'" class="topbar-actions">
           <select v-model.number="currentId" class="student-select" aria-label="选择学生">
             <option v-for="student in students" :key="student.id" :value="student.id">
               {{ student.name }} · {{ student.major || '未填专业' }}
@@ -342,6 +344,10 @@ onBeforeUnmount(() => {
           @notify="notify"
           @updated="onEvaluated"
           @recorded="onRecorded"
+        />
+        <UploadLab
+          v-else-if="activeTab === 'upload'"
+          @notify="notify"
         />
       </template>
     </main>

@@ -17,7 +17,7 @@
 | 需求 3：个性化学习路径与资源推送 | ✅ 依据画像与已有资源生成 5 步路径，含目标、资源、时长、完成标准、进度持久化 |
 | 需求 4：智能辅导（加分项） | ✅ 结合画像与关联资源答疑，输出结论、拆解、类比、Mermaid 结构图、下一步 |
 | 需求 5：学习效果评估（加分项） | ✅ 行为记录 → 7 维评分 → 优势/薄弱点/建议 → 自动回写画像，形成闭环 |
-| 工程实践：读写分离、连接池、文件上传、Swagger、Agent 可观测性 | ✅ 显式主从分流、从库降级、连接池、分片上传、`/docs`、`agent_run` 全链路追踪 |
+| 工程实践：读写分离、连接池、文件上传、Swagger、Agent 可观测性 | ✅ 显式主从分流、从库降级、连接池、分片上传、**断点续传 / 上传下载进度条 / Range 下载 / 小文件批量上传**、`/docs`、`agent_run` 全链路追踪 |
 
 ### 界面一览
 
@@ -30,6 +30,18 @@
 | ![学习路径](docs/screenshots/path.png) | ![学习评估](docs/screenshots/assessment.png) |
 
 更多资源详情截图见 `docs/screenshots/`（文档、导图、练习、代码、微课、辅导）。
+
+### 文件传输实验台
+
+![上传实验](docs/screenshots/upload-paused.png)
+
+左侧导航 **07 上传实验**：20MB 演示文件 → 切片 → 暂停 → 继续 → 合并 → 下载暂停 → Range 续传；第三块还可以一次批量上传 5 个小文件。
+
+![小文件批量上传](docs/screenshots/batch-upload.png)
+
+- 原理流程：[docs/原理-上传下载断点续传.md](docs/原理-上传下载断点续传.md)
+- 2 分钟简化录屏脚本：[docs/演示脚本-上传下载断点续传.md](docs/演示脚本-上传下载断点续传.md)
+- 课程笔记：[docs/lessons/22-断点续传与进度条.md](docs/lessons/22-断点续传与进度条.md)
 
 ---
 
@@ -198,7 +210,11 @@ LLM_MODEL=claude-opus-4-8
 | POST | `/api/assessment/records` | 记录学习行为 |
 | POST | `/api/assessment/evaluate` | 生成评估并回写画像 |
 | GET | `/api/agent-runs/{student_id}` | Agent 运行轨迹 |
-| POST | `/api/upload/*` | 分片上传 / 重组 / 批量上传 |
+| POST | `/api/upload/chunk` | 上传一个分片（`file_id + chunk_index + file`） |
+| GET | `/api/upload/status/{file_id}` | 查询已上传 / 缺失分片（断点续传核心） |
+| POST | `/api/upload/complete` | 按 0..N 顺序合并分片并清理临时目录 |
+| GET | `/api/upload/download/{filename}` | 支持 `Range` 的下载（206 Partial Content） |
+| POST | `/api/upload/batch` | 小文件批量上传 |
 
 完整交互文档见 `/docs`。
 
@@ -226,7 +242,7 @@ Learning/
 │   ├── src/components/         # 6 个页面 + 雷达图/导图/练习/Markdown
 │   └── src/api.js              # 统一请求封装
 ├── docs/
-│   ├── lessons/                # 课程笔记（01–21）
+│   ├── lessons/                # 课程笔记（01–22）
 │   └── screenshots/            # 界面截图
 ├── logs/                       # 运行日志（不参与版本控制）
 └── README.md
@@ -268,6 +284,8 @@ Learning/
 | 鉴权 | 演示项目，学生选择器直接切换 | 加登录、JWT、按学生隔离数据 |
 | 生成方式 | 同步请求，前端等待 | 改为后台任务 + 任务状态轮询/SSE |
 | 前端工程 | Vite 单页，无路由库 | 引入 Vue Router / Pinia（如规模扩大） |
+| 下载续传 | 分片暂存在浏览器内存，刷新会丢 | 生产环境用 File System Access API 写磁盘，或服务端断点下载任务 |
+| 临时分片 | 合并成功会清理，暂停的会保留 | 加定时任务清理长期未完成的分片 |
 
 ---
 
@@ -277,6 +295,9 @@ Learning/
 - [19-连接池与主从读写分离实战](docs/lessons/19-连接池与主从读写分离实战.md)
 - [20-LLM适配层与Mock降级](docs/lessons/20-LLM适配层与Mock降级.md)
 - [21-Vue工作台与前后端联调](docs/lessons/21-Vue工作台与前后端联调.md)
+- [22-断点续传与进度条](docs/lessons/22-断点续传与进度条.md)
+
+录屏脚本：[演示脚本-上传下载断点续传.md](docs/演示脚本-上传下载断点续传.md)
 
 更早的工程基础、MySQL、Nginx、文件上传、禅道 RBAC 笔记见 `docs/lessons/`。
 

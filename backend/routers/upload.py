@@ -6,12 +6,15 @@
 """
 from __future__ import annotations
 
+import mimetypes
 import os
 import re
 import shutil
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from config import UPLOAD_DIR
 from models import ApiResponse
@@ -83,17 +86,123 @@ async def complete_upload(
     })
 
 
+@router.get("/status/{file_id}")
+def upload_status(
+    file_id: str,
+    total_chunks: int = Query(default=0, ge=0, le=100000),
+) -> ApiResponse:
+    """断点续传的核心：告诉前端「服务端已经收到了哪些分片」。
+
+    前端暂停/刷新后，只需要重新上传 missing 里的分片，而不是整文件重传。
+    """
+    safe_id = _safe_name(file_id, "upload")
+    chunk_dir = UPLOAD_ROOT / safe_id
+    uploaded: list[int] = []
+    if chunk_dir.is_dir():
+        uploaded = sorted(
+            int(path.name)
+            for path in chunk_dir.iterdir()
+            if path.is_file() and path.name.isdigit()
+        )
+    uploaded_set = set(uploaded)
+    missing = (
+        [index for index in range(total_chunks) if index not in uploaded_set]
+        if total_chunks
+        else []
+    )
+    return ApiResponse(data={
+        "file_id": safe_id,
+        "uploaded": uploaded,
+        "missing": missing,
+        "uploaded_count": len(uploaded),
+    })
+
+
+def _content_disposition(filename: str) -> str:
+    ascii_name = filename.encode("ascii", "ignore").decode() or "download.bin"
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
+
+
+@router.get("/download/{filename}")
+def download(filename: str, request: Request):
+    """支持 Range 的下载端点：206 Partial Content 是下载断点续传的基础。"""
+    safe_filename = _safe_name(filename, "download.bin")
+    path = UPLOAD_ROOT / safe_filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    total = path.stat().st_size
+    media_type = mimetypes.guess_type(safe_filename)[0] or "application/octet-stream"
+    disposition = _content_disposition(safe_filename)
+    range_header = request.headers.get("range")
+
+    if range_header:
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+        if match:
+            start_raw, end_raw = match.groups()
+            start = int(start_raw) if start_raw else 0
+            end = int(end_raw) if end_raw else total - 1
+            end = min(end, total - 1)
+            if start >= total or end < start:
+                return Response(
+                    status_code=416,
+                    headers={"Content-Range": f"bytes */{total}"},
+                )
+            length = end - start + 1
+
+            def iter_range():
+                with path.open("rb") as source:
+                    source.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        block = source.read(min(64 * 1024, remaining))
+                        if not block:
+                            break
+                        remaining -= len(block)
+                        yield block
+
+            return StreamingResponse(
+                iter_range(),
+                status_code=206,
+                media_type=media_type,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{total}",
+                    "Content-Length": str(length),
+                    "Accept-Ranges": "bytes",
+                    "Content-Disposition": disposition,
+                },
+            )
+
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=safe_filename,
+        headers={"Accept-Ranges": "bytes", "Content-Disposition": disposition},
+    )
+
+
 @router.post("/batch")
 async def upload_batch(files: list[UploadFile] = File(...)) -> ApiResponse:
     """小文件批量上传：一次请求接收多个小文件，逐个落盘。"""
     if len(files) > 100:
         raise HTTPException(status_code=400, detail="一次最多上传 100 个文件")
     saved = []
+    total_size = 0
     for f in files:
         safe_filename = _safe_name(f.filename or "", "unnamed.bin")
         path = UPLOAD_ROOT / safe_filename
         with path.open("wb") as out:
             shutil.copyfileobj(f.file, out)
-        saved.append({"filename": safe_filename, "size": path.stat().st_size})
+        size = path.stat().st_size
+        total_size += size
+        saved.append({
+            "filename": safe_filename,
+            "size": size,
+            "url": f"/uploads/{safe_filename}",
+        })
 
-    return ApiResponse(data={"count": len(saved), "files": saved})
+    return ApiResponse(data={
+        "count": len(saved),
+        "total_size": total_size,
+        "files": saved,
+    })

@@ -48,6 +48,24 @@ export const api = {
   markView: (id, duration = 30) =>
     request(`/resources/${id}/view`, { method: 'POST', params: { duration_sec: duration } }),
 
+  uploadStatus: (fileId, totalChunks) =>
+    request(`/upload/status/${encodeURIComponent(fileId)}`, {
+      params: { total_chunks: totalChunks },
+    }),
+  completeUpload: async (fileId, totalChunks, filename) => {
+    const form = new FormData()
+    form.append('file_id', fileId)
+    form.append('total_chunks', String(totalChunks))
+    form.append('filename', filename)
+    const response = await fetch('/api/upload/complete', { method: 'POST', body: form })
+    const payload = await response.json()
+    if (!response.ok || payload.code !== 0) {
+      throw new Error(payload.message || `合并失败（HTTP ${response.status}）`)
+    }
+    return payload.data
+  },
+  uploadDownloadUrl: (filename) => `/api/upload/download/${encodeURIComponent(filename)}`,
+
   generatePath: (studentId) =>
     request('/paths/generate', { method: 'POST', body: { student_id: studentId } }),
   path: (studentId) => request(`/paths/${studentId}`),
